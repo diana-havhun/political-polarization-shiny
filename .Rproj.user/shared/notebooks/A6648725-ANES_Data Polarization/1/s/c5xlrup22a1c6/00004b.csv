@@ -1,0 +1,7 @@
+"0","roc_log_att  <- roc(as.numeric(test_att_80$party  == ""Republican""), log_att_prob_80,  quiet = TRUE)"
+"0","roc_rf_att   <- roc(as.numeric(test_att_80$party  == ""Republican""), rf_att_prob_80,   quiet = TRUE)"
+"0","roc_log_demo <- roc(as.numeric(test_demo_80$party == ""Republican""), log_demo_prob_80, quiet = TRUE)"
+"0","roc_rf_demo  <- roc(as.numeric(test_demo_80$party == ""Republican""), rf_demo_prob_80,  quiet = TRUE)"
+"0",""
+"0","plot(roc_log_att, col = ""#7b68ee"", lwd = 2, "
+"0","     main = ""ROC Curves — 1980s Models"")"

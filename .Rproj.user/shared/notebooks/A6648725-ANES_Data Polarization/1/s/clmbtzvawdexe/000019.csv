@@ -1,0 +1,5 @@
+"0",""
+"0","results %>% "
+"0","  filter(model_type == ""Attitudes"") %>%"
+"0","  select(decade, n_predictors, predictors_used) %>%"
+"0","  print(width = 200)"

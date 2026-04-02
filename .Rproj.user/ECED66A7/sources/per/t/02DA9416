@@ -1,0 +1,27 @@
+{
+    "id": "02DA9416",
+    "path": "~/Downloads/ML/ANES_Political Polarization/ANES_Data_Polarization.rmd",
+    "project_path": "ANES_Data_Polarization.rmd",
+    "type": "r_markdown",
+    "hash": "3807180039",
+    "contents": "",
+    "dirty": false,
+    "created": 1772994791320.0,
+    "source_on_save": false,
+    "relative_order": 1,
+    "properties": {
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "17,3",
+        "scrollLine": "0",
+        "last_setup_crc32": "ce5d7635d868fe9e"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1773387727,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1773387727199,
+    "read_only": false,
+    "read_only_alternatives": []
+}

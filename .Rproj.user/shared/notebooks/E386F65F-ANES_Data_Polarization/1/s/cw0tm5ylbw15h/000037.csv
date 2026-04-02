@@ -1,0 +1,7 @@
+"0","legend(""bottomright"","
+"0","       legend = c(paste0(""Attitudes LogReg (AUC="", round(auc(roc_log_att),  3), "")""),"
+"0","                  paste0(""Attitudes RF     (AUC="", round(auc(roc_rf_att),   3), "")""),"
+"0","                  paste0(""Demographics LogReg (AUC="", round(auc(roc_log_demo), 3), "")""),"
+"0","                  paste0(""Demographics RF  (AUC="", round(auc(roc_rf_demo),  3), "")"")),"
+"0","       col = c(""#7b68ee"", ""#2d8659"", ""#e6994a"", ""#c9853a""),"
+"0","       lwd = 2, lty = c(1, 1, 1, 2), cex = 0.9)"

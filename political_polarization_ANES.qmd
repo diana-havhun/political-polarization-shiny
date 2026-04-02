@@ -1,0 +1,1331 @@
+---
+title: "Political Polarization in the United States: Predicting Party Identification from Social Attitudes and Demographics Using ANES Data (1948–2024)"
+author: "Diana Havhun"
+date: "2026-03-04"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: "Table of Contents"
+    number-sections: true
+    theme: cosmo
+    code-fold: true
+    code-summary: "Show code"
+    fig-width: 9
+    fig-height: 6
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+  echo: true
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(scales)
+library(stringr)
+library(ggplot2)
+library(gridExtra)
+library(psych)
+library(knitr)
+library(randomForest)
+library(mice)
+library(caret)
+library(pROC)
+library(rpart)
+library(rpart.plot)
+library(glmnet)
+```
+
+# Introduction
+
+The question of whether American society is becoming more politically polarized has been one of the most actively debated topics in political science over the past two decades. While scholars broadly agree that *elite* polarization — the ideological divergence between Democratic and Republican politicians — has increased dramatically since the 1970s, the extent to which mass polarization mirrors this trend remains contested [@fiorina2005; @abramowitz2008].
+
+One influential perspective, advanced by @fiorina2005, argues that ordinary Americans remain largely moderate and that the appearance of polarization is driven by elite cues and media framing rather than genuine attitude change among the public. In contrast, @abramowitz2008 contend that polarization is real and measurable, pointing to evidence that partisan identifiers have become increasingly sorted along ideological lines. @mason2018 further argues that even without large shifts in policy preferences, the alignment of partisan, ideological, and social identities has produced a form of "social polarization" that intensifies affective hostility between parties.
+
+A more nuanced empirical picture emerges from studies that distinguish between *opinion polarization* (the divergence of attitudes) and *partisan sorting* (the alignment of attitudes with party labels). @baldassarri2008, using ANES data from 1972 to 2004, found that while Americans did not become more extreme in their individual policy views, the correlation between issue positions and party identification increased substantially — a pattern they termed "issue partisanship" rather than ideological constraint. @murphy2020 extended this analysis through 2016 and confirmed that partisan alignment continued to increase at an accelerated pace, particularly on cultural and moral issues.
+
+A methodologically distinct approach was taken by @kim2022, who used both logistic regression and tree-based machine learning models to predict party identification from demographic characteristics alone. Their finding that demographics predict only about 64% of partisan identifications, and that this predictive power has not increased over time, highlights an important gap: attitudes, not demographics, may be the primary driver of sorting. Most recently, @ojer2025 examined multidimensional ideological polarization across demographic groups, finding that different social groups have systematically diverged in ideological space.
+
+The present study contributes to this literature by combining both attitudinal and demographic predictors in a classification framework applied to the American National Election Studies (ANES) Cumulative Data File from 1952 to 2024. If ideological sorting has indeed increased, we should observe that models predicting party identification from social attitudes become more accurate over time. This approach operationalizes sorting as predictability: a more sorted electorate is one in which knowing a person's views on abortion, gun control, or homosexuality tells you more about their party than it did decades ago.
+
+## Research Questions and Hypotheses
+
+The central research question is: **How has the predictive power of social attitudes and socio-demographic characteristics for party identification among Americans changed between 1972 and 2024, and what does this reveal about the process of ideological sorting and political polarization?**
+
+This is operationalized through the following hypotheses:
+
+- **H1:** Classification models trained on political attitudes will show higher accuracy in later periods than in earlier periods, consistent with increased ideological sorting.
+- **H2:** Socio-demographic characteristics will become increasingly predictive of party identification over time, reflecting the shift from policy-based to identity-based partisanship.
+- **H3:** Moral and cultural issues (abortion, homosexuality) will show the largest increase in predictive importance, while economic issues will show smaller gains.
+- **H4:** The proportion of misclassified respondents will decrease over time, indicating a shrinking political middle.
+
+---
+
+# Data
+
+## American National Election Studies (ANES)
+
+This study uses the **ANES Time Series Cumulative Data File** (1948–2024), a major longitudinal survey dataset that tracks political attitudes, behaviors, and demographic characteristics of the American electorate across presidential and midterm election cycles. The cumulative file aggregates 32 individual survey waves and contains 73,745 respondents and 1,030 variables.
+
+The ANES is the gold standard dataset for studying American political behavior over time. Its consistent question wording and sampling methodology make it uniquely suited for longitudinal analysis of partisan sorting, as changes in model performance across decades can be attributed to genuine shifts in the relationship between attitudes and party identification rather than to changes in measurement.
+
+## Variable Selection
+
+```{r load-data}
+data <- read.csv("anes_timeseries_cdf_csv_20260205.csv")
+dim(data)
+
+data_clean <- data %>%
+  select(
+    year = VCF0004,
+    partyid = VCF0301,
+    age = VCF0101,
+    cohort = VCF0103,
+    gender = VCF0104,
+    race = VCF0105a,
+    education = VCF0110,
+    region = VCF0112,
+    income = VCF0114,
+    religion = VCF0128,
+    church = VCF0130,
+    marital = VCF0147,
+    work_status = VCF0116,
+    ideology = VCF0803,
+    gov_health_insurance = VCF0806,
+    gov_jobs = VCF0809,
+    aid_black = VCF0830,
+    abortion = VCF0838,
+    gov_spending = VCF0839,
+    env_regulation = VCF0842,
+    defense_spending = VCF0843,
+    affirmative_action = VCF0867,
+    religion_important = VCF0846,
+    bible_authority = VCF0850,
+    moral_adjust = VCF0852,
+    traditional_values = VCF0853,
+    protect_homosexuals = VCF0876,
+    gay_adoption = VCF0878,
+    death_penalty = VCF9236,
+    immigration = VCF0879,
+    black_conditions = VCF9039,
+    black_no_favors = VCF9040,
+    black_try_harder = VCF9041,
+    black_gotten_less = VCF9042,
+    equal_opportunity = VCF9013,
+    not_problem_unequal = VCF9016,
+    worry_less_equality = VCF9017,
+    fewer_problems_equal = VCF9018,
+    govt_few_interests = VCF0605,
+    govt_waste_money = VCF0606,
+    govt_officials_care = VCF0609,
+    have_say_in_govt = VCF0613,
+    elections_matter = VCF0624,
+    spend_poor = VCF0886,
+    spend_crime = VCF0888,
+    spend_schools = VCF0890,
+    spend_welfare = VCF0894,
+    spend_environment = VCF9047,
+    spend_social_security = VCF9049,
+    therm_blacks = VCF0206,
+    therm_whites = VCF0207,
+    therm_liberals = VCF0211,
+    therm_conservatives = VCF0212,
+    therm_dem_party = VCF0218,
+    therm_rep_party = VCF0224,
+    therm_gays = VCF0232,
+    therm_feminists = VCF0253,
+    therm_christian_fund = VCF0234,
+    therm_big_business = VCF0209,
+    therm_unions = VCF0210,
+    economy_past_year = VCF0870,
+    personal_finances = VCF0880,
+    election_interest = VCF0310,
+    party_difference = VCF0501,
+    approve_president = VCF0450,
+    less_govt_or_more = VCF9131,
+    us_unconcerned_world = VCF0823
+  )
+dim(data_clean)
+```
+
+### Dependent Variable
+
+The dependent variable is **party identification**, derived from the ANES 7-point party identification scale (VCF0301), ranging from Strong Democrat (1) to Strong Republican (7). For classification purposes, respondents identifying as Democrats (1–3) or Republicans (5–7) are retained; pure Independents (4) are excluded. This follows standard practice in the sorting literature [@baldassarri2008; @murphy2020] and yields a binary outcome suitable for logistic regression and random forest classifiers.
+
+### Independent Variables
+
+Two sets of predictors are used, corresponding to the two analytical tracks:
+
+**Demographics track:** age, gender (binary), race (7-category: White, Black, Asian/PI, Native American, Hispanic, Other), education (4-category), region (NE/MW/South/West), income (5-percentile groups), religion (Protestant/Catholic/Jewish/Other-None), church attendance frequency, marital status, employment status, and religious importance.
+
+**Attitudes track:** 11 policy attitude items available with ≥40% coverage across all decades from the 1980s onward — government job guarantee (`gov_jobs`), aid to Black Americans (`aid_black`), abortion (`abortion`), government spending (`gov_spending`), importance of religion (`religion_important`), moral standards adjustment (`moral_adjust`), traditional values (`traditional_values`), equal opportunity (`equal_opportunity`), attitudes toward inequality (`not_problem_unequal`, `worry_less_equality`, `fewer_problems_equal`).
+
+**Note on ideology exclusion:** Self-placement on the liberal-conservative scale (VCF0803) is excluded from predictive models. Because ideology is conceptually near-tautological with party identification in the current era — the two constructs have become almost perfectly correlated — including it would inflate model accuracy without providing substantive insight into the sorting process. It is retained for descriptive EDA only.
+
+## Data Cleaning
+
+```{r data-cleaning}
+therm_vars <- c("therm_blacks", "therm_whites", "therm_liberals", 
+                "therm_conservatives", "therm_dem_party", "therm_rep_party", 
+                "therm_gays", "therm_feminists", "therm_christian_fund", 
+                "therm_big_business", "therm_unions")
+
+scale_7pt_vars <- c("ideology", "gov_health_insurance", "gov_jobs", "aid_black",
+                    "gov_spending", "env_regulation", "defense_spending")
+
+agree_disagree_5pt_vars <- c("moral_adjust", "traditional_values",
+                              "black_conditions", "black_no_favors", 
+                              "black_try_harder", "black_gotten_less",
+                              "equal_opportunity", "not_problem_unequal", 
+                              "worry_less_equality", "fewer_problems_equal")
+
+spending_vars <- c("spend_poor", "spend_crime", "spend_schools", 
+                   "spend_welfare", "spend_environment", "spend_social_security")
+
+trust_vars <- c("govt_few_interests", "govt_waste_money", 
+                "govt_officials_care", "have_say_in_govt", "elections_matter")
+
+non_therm <- setdiff(names(data_clean), therm_vars)
+data_clean <- data_clean %>%
+  mutate(across(all_of(non_therm), ~ ifelse(. == 0, NA, .)))
+
+data_clean <- data_clean %>%
+  mutate(across(all_of(therm_vars), ~ ifelse(. %in% c(98, 99), NA, .)))
+
+data_clean <- data_clean %>%
+  mutate(across(all_of(scale_7pt_vars), ~ ifelse(. == 9, NA, .)))
+
+data_clean$abortion[data_clean$abortion == 9] <- NA
+
+data_clean <- data_clean %>%
+  mutate(across(all_of(agree_disagree_5pt_vars), ~ ifelse(. %in% c(8, 9), NA, .)))
+
+data_clean <- data_clean %>%
+  mutate(across(all_of(spending_vars), ~ ifelse(. %in% c(8, 9), NA, .)))
+
+data_clean <- data_clean %>%
+  mutate(across(all_of(trust_vars), ~ ifelse(. == 9, NA, .)))
+
+data_clean <- data_clean %>%
+  mutate(
+    affirmative_action = ifelse(affirmative_action == 8, NA, affirmative_action),
+    protect_homosexuals = ifelse(protect_homosexuals == 8, NA, protect_homosexuals),
+    gay_adoption = ifelse(gay_adoption == 8, NA, gay_adoption),
+    religion_important = ifelse(religion_important %in% c(8, 9), NA, religion_important),
+    bible_authority = ifelse(bible_authority == 9, NA, bible_authority),
+    immigration = ifelse(immigration %in% c(8, 9), NA, immigration),
+    approve_president = ifelse(approve_president == 8, NA, approve_president),
+    less_govt_or_more = ifelse(less_govt_or_more == 8, NA, less_govt_or_more)
+  )
+
+data_clean$death_penalty[data_clean$death_penalty < 0] <- NA
+
+data_clean <- data_clean %>%
+  mutate(
+    economy_past_year = ifelse(economy_past_year == 8, NA, economy_past_year),
+    personal_finances = ifelse(personal_finances == 9, NA, personal_finances),
+    election_interest = ifelse(election_interest == 9, NA, election_interest),
+    party_difference = ifelse(party_difference == 9, NA, party_difference),
+    us_unconcerned_world = ifelse(us_unconcerned_world == 9, NA, us_unconcerned_world)
+  )
+
+data_clean$church[data_clean$church %in% c(8, 9)] <- NA
+data_clean$race[data_clean$race %in% c(0, 7, 9)] <- NA
+
+data_clean <- data_clean %>%
+  mutate(year = as.numeric(year), age = as.numeric(age))
+```
+
+### Missingness Overview
+
+A key methodological challenge in longitudinal ANES analysis is uneven variable coverage across survey waves. Not all questions were asked in every year; many attitude items were introduced in the 1980s or later. The table below shows the percentage of missing values for all selected variables.
+
+```{r missingness-table}
+data_clean %>%
+  summarise(across(everything(), ~sum(is.na(.)))) %>%
+  pivot_longer(everything(), names_to = "variable", values_to = "missing") %>%
+  mutate(percent = round(missing / nrow(data_clean) * 100, 1)) %>%
+  arrange(desc(percent)) %>%
+  kable(caption = "Missing values by variable (% of total N = 73,745)")
+```
+
+Variables with very high missingness (>55%) — such as `env_regulation`, `gay_adoption`, `immigration`, and feeling thermometers for feminists and Christian fundamentalists — are excluded from the core attitude models. The 11-variable attitude set used in the ML analysis is limited to items with ≥40% availability in every decade from the 1980s onward.
+
+## Analytical Sample Construction
+
+```{r sample-construction}
+data_model <- data_clean %>%
+  mutate(party = case_when(
+    partyid %in% c(1, 2, 3) ~ "Democrat",
+    partyid %in% c(5, 6, 7) ~ "Republican",
+    TRUE ~ NA_character_
+  )) %>%
+  filter(!is.na(party)) %>%
+  mutate(party = as.factor(party))
+
+data_model %>%
+  count(party) %>%
+  mutate(pct = round(n / sum(n) * 100, 1)) %>%
+  kable(caption = "Party identification distribution (excluding pure Independents)")
+```
+
+After excluding pure Independents and respondents with missing party identification, the analytical sample contains **63,659 respondents** across 32 survey waves (1952–2024). Democrats represent 57.9% and Republicans 42.1% of the sample — a slight imbalance that reflects the historical Democratic lean of the ANES sample, particularly in earlier decades.
+
+## Derived Variables
+
+```{r derived-vars}
+data_model <- data_model %>%
+  mutate(
+    birth_year = year - age,
+    generation = case_when(
+      birth_year <= 1945 ~ "Silent Generation",
+      birth_year >= 1946 & birth_year <= 1964 ~ "Baby Boomer",
+      birth_year >= 1965 & birth_year <= 1980 ~ "Gen X",
+      birth_year >= 1981 & birth_year <= 1996 ~ "Millennial",
+      birth_year >= 1997 ~ "Gen Z"
+    ),
+    decade = case_when(
+      year < 1960 ~ "1950s",
+      year < 1970 ~ "1960s",
+      year < 1980 ~ "1970s",
+      year < 1990 ~ "1980s",
+      year < 2000 ~ "1990s",
+      year < 2010 ~ "2000s",
+      year < 2020 ~ "2010s",
+      year >= 2020 ~ "2020s"
+    ),
+    gender = factor(gender, levels = c(1, 2), labels = c("Male", "Female")),
+    race = factor(race, levels = c(1, 2, 3, 4, 5, 6),
+                  labels = c("White", "Black", "Asian/PI", 
+                             "Native American", "Hispanic", "Other")),
+    education = factor(education, levels = c(1, 2, 3, 4),
+                       labels = c("< High School", "High School", 
+                                  "Some College", "College+")),
+    region = factor(region, levels = c(1, 2, 3, 4),
+                    labels = c("Northeast", "Midwest", "South", "West")),
+    religion = factor(religion, levels = c(1, 2, 3, 4),
+                      labels = c("Protestant", "Catholic", "Jewish", "Other/None"))
+  )
+```
+
+---
+
+# Methods
+
+## Analytical Strategy
+
+This study employs a **decade-by-decade classification framework** to assess how the relationship between predictors and party identification has changed over time. For each decade (1980s through 2020s), separate models are trained and evaluated on held-out test data. The temporal trend in out-of-sample accuracy is the primary evidence for or against the sorting hypotheses.
+
+The choice to use predictive accuracy as the primary outcome metric — rather than, say, regression coefficients — follows @kim2022 and is substantively motivated: if sorting is increasing, party membership should become more *predictable* from attitudes and demographics. A model that achieves 85% accuracy in the 2020s but only 68% in the 1980s provides direct evidence that the attitude-party link has strengthened.
+
+Two analytical tracks are maintained separately throughout:
+
+1. **Demographics track:** Predicts party ID from socio-demographic characteristics only. Tests H2.
+2. **Attitudes track:** Predicts party ID from policy attitude items only, with MICE imputation for missing values. Tests H1 and H3.
+
+## Machine Learning Models
+
+Three classification algorithms are applied to each track:
+
+**Logistic Regression** serves as the interpretable baseline. Coefficients are directly interpretable as the direction and magnitude of each predictor's relationship with Republican (vs. Democrat) identification, controlling for other predictors. This model is used to construct coefficient heatmaps tracking how the importance of specific attitudes has shifted across decades, addressing H3 directly.
+
+**Decision Trees** (via `rpart`) provide an interpretable nonlinear alternative. Trees are pruned using minimum node size and complexity parameter constraints to prevent overfitting. The full-sample and White-only trees are visualized to identify the most discriminating demographic combinations.
+
+**Random Forests** (via `randomForest`, ntree=500) serve as the primary performance benchmark. By averaging over many decorrelated trees, random forests reduce variance and typically outperform single trees. For the attitudes track, hyperparameter tuning via `tuneRF` identified `mtry=2` as optimal for the 2020s data (OOB error: 15.07% vs. 15.44% for default `mtry=3`).
+
+**LASSO Logistic Regression** (via `glmnet`, alpha=1, 10-fold cross-validation) is applied to the attitudes track as a variable selection tool. By penalizing the absolute magnitude of coefficients, LASSO can shrink irrelevant predictors to zero, providing insight into which attitude variables are genuinely predictive vs. redundant across decades.
+
+## Handling Missing Data
+
+Missing data in the attitudes track is handled via **Multiple Imputation by Chained Equations (MICE)**, using predictive mean matching (`method="pmm"`, `m=5` imputations, `maxit=10`). Imputation is performed *within* each decade subset to preserve temporal context and avoid information leakage across decades. Model accuracy metrics are averaged across the 5 imputed datasets following Rubin's (1987) rules.
+
+MICE was chosen over complete-case analysis because listwise deletion in the attitudes track would disproportionately exclude older survey waves where many attitude items were not yet asked, introducing systematic bias toward more modern respondents.
+
+## Evaluation Metrics
+
+Models are evaluated on a **70/30 train-test split** (stratified by party), using:
+
+- **Accuracy:** Proportion of correctly classified respondents
+- **F1 Score:** Harmonic mean of precision and recall (accounts for class imbalance)
+- **AUC-ROC:** Area under the receiver operating characteristic curve (threshold-independent discrimination)
+
+All splits use `set.seed(123)` for reproducibility.
+
+---
+
+# Exploratory Data Analysis
+
+## Party Identification Over Time
+
+```{r eda-setup}
+party_colors <- c("Democrat" = "#2171b5", "Republican" = "#cb181d")
+
+theme_party <- theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    plot.subtitle = element_text(color = "gray40", size = 10),
+    legend.position = "bottom"
+  )
+
+calc_party_pct <- function(data, group_var, group_value) {
+  data %>%
+    filter(!is.na(party), !!sym(group_var) == group_value) %>%
+    mutate(period = floor(year / 10) * 10) %>%
+    group_by(period, party) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    group_by(period) %>%
+    mutate(pct = n / sum(n) * 100)
+}
+```
+
+```{r party-overall}
+party_overall <- data_model %>%
+  filter(!is.na(party)) %>%
+  mutate(period = floor(year / 4) * 4) %>%
+  group_by(period, party) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(period) %>%
+  mutate(pct = n / sum(n) * 100)
+
+ggplot(party_overall, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(30, 70)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Party Identification Over Time",
+       subtitle = "Among respondents identifying as Democrat or Republican (excluding Independents)",
+       x = "", y = "% of respondents", color = "") +
+  theme_party
+```
+
+The overall trend in party identification shows a substantial Democratic advantage through the 1950s–1970s, reflecting the post-New Deal coalition. The gap has narrowed considerably since the 1980s, with parties approaching near-parity in the 2020s — consistent with the nationalization of American politics documented by @abramowitz2008.
+
+## Party Affiliation by Demographic Group
+
+```{r edu-plot}
+data_edu <- data_model %>%
+  filter(!is.na(education), !is.na(party)) %>%
+  mutate(edu_group = case_when(
+    education %in% c("Some College", "College+") ~ "College or higher",
+    TRUE ~ "No college degree"
+  ))
+
+p_college <- calc_party_pct(data_edu, "edu_group", "College or higher")
+g_college <- ggplot(p_college, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(25, 75)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "College or Higher", x = "", y = "% of group", color = "") +
+  theme_party
+
+p_nocollege <- calc_party_pct(data_edu, "edu_group", "No college degree")
+g_nocollege <- ggplot(p_nocollege, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(25, 75)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "No College Degree", x = "", y = "% of group", color = "") +
+  theme_party
+
+grid.arrange(g_college, g_nocollege, ncol = 2,
+             top = grid::textGrob("Party Affiliation by Education Over Time",
+                                  gp = grid::gpar(fontsize = 16, fontface = "bold")))
+```
+
+The education reversal is one of the most striking demographic shifts in contemporary American politics. College-educated voters, historically a Republican constituency, have shifted substantially toward Democrats since the 1990s — while non-college voters have moved in the opposite direction. This "diploma divide" has been documented extensively [@abramowitz2008; @ojer2025] and is visible here in the crossing of the education-party lines around 2010–2020.
+
+```{r gender-plot}
+p_female <- calc_party_pct(data_model, "gender", "Female")
+g_female <- ggplot(p_female, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(25, 75)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Female", x = "", y = "% of group", color = "") +
+  theme_party
+
+p_male <- calc_party_pct(data_model, "gender", "Male")
+g_male <- ggplot(p_male, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(25, 75)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Male", x = "", y = "% of group", color = "") +
+  theme_party
+
+grid.arrange(g_female, g_male, ncol = 2,
+             top = grid::textGrob("Party Affiliation by Sex Over Time",
+                                  gp = grid::gpar(fontsize = 16, fontface = "bold")))
+```
+
+The gender gap in partisanship, while modest in the 1950s–1960s, has grown over time. Women have consistently leaned more Democratic than men since the 1980s — a pattern linked to diverging views on social issues, reproductive rights, and the role of government [@mason2018].
+
+```{r income-plot}
+data_income <- data_model %>%
+  filter(!is.na(income), !is.na(party)) %>%
+  mutate(income_group = case_when(
+    income %in% c(1, 2) ~ "Low income",
+    income == 3 ~ "Middle income",
+    income %in% c(4, 5) ~ "High income"
+  ))
+
+p_low <- calc_party_pct(data_income, "income_group", "Low income")
+g_low <- ggplot(p_low, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(25, 75)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Low Income", x = "", y = "% of group", color = "") +
+  theme_party
+
+p_high <- calc_party_pct(data_income, "income_group", "High income")
+g_high <- ggplot(p_high, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(25, 75)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "High Income", x = "", y = "% of group", color = "") +
+  theme_party
+
+grid.arrange(g_low, g_high, ncol = 2,
+             top = grid::textGrob("Party Affiliation by Income Over Time",
+                                  gp = grid::gpar(fontsize = 16, fontface = "bold")))
+```
+
+```{r religion-bar}
+relig_party <- data_model %>%
+  filter(!is.na(religion), !is.na(party)) %>%
+  group_by(religion, party) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  group_by(religion) %>%
+  mutate(pct = n / sum(n) * 100, total = sum(n)) %>%
+  ungroup()
+
+ggplot(relig_party, aes(x = reorder(religion, pct * ifelse(party == "Republican", 1, -1)),
+                        y = pct, fill = party)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.7) +
+  scale_fill_manual(values = c("Democrat" = "#2171b5", "Republican" = "#cb181d")) +
+  scale_y_continuous(labels = function(x) paste0(x, "%")) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "white", linewidth = 0.8) +
+  coord_flip() +
+  labs(title = "Party Affiliation by Religion",
+       subtitle = "Dashed line = 50/50 split.",
+       x = "", y = "% of respondents within religion", fill = "") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 14),
+        plot.subtitle = element_text(color = "gray40", size = 10),
+        legend.position = "bottom")
+```
+
+```{r religion-time}
+p_protestant <- calc_party_pct(data_model, "religion", "Protestant")
+g_protestant <- ggplot(p_protestant, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(20, 80)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Protestant", x = "", y = "% of group", color = "") + theme_party
+
+p_catholic <- calc_party_pct(data_model, "religion", "Catholic")
+g_catholic <- ggplot(p_catholic, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(20, 80)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Catholic", x = "", y = "% of group", color = "") + theme_party
+
+p_jewish <- calc_party_pct(data_model, "religion", "Jewish")
+g_jewish <- ggplot(p_jewish, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(0, 100)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Jewish", x = "", y = "% of group", color = "") + theme_party
+
+p_other <- calc_party_pct(data_model, "religion", "Other/None")
+g_other <- ggplot(p_other, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(0, 100)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Other / None", x = "", y = "% of group", color = "") + theme_party
+
+grid.arrange(g_protestant, g_catholic, g_jewish, g_other, ncol = 2, nrow = 2,
+             top = grid::textGrob("Party Affiliation by Religion Over Time",
+                                  gp = grid::gpar(fontsize = 16, fontface = "bold")))
+```
+
+Religion emerges as one of the strongest demographic sorting variables. The Republican realignment of white Protestants — and increasingly Catholics — reflects the "culture war" sorting described by @baldassarri2008 and @murphy2020. Jewish voters and those with no religious affiliation remain overwhelmingly Democratic. The religiously unaffiliated ("nones") have grown substantially as a share of the electorate, contributing to a secular-religious partisan divide that has intensified since the 1990s.
+
+```{r church-attendance}
+data_church <- data_model %>%
+  filter(!is.na(church), !is.na(party)) %>%
+  mutate(church_group = case_when(
+    church %in% c(1, 2) ~ "Weekly/Almost weekly",
+    church %in% c(3, 4) ~ "Sometimes",
+    church %in% c(5, 7) ~ "Rarely/Never"
+  ))
+
+p_weekly <- calc_party_pct(data_church, "church_group", "Weekly/Almost weekly")
+g_weekly <- ggplot(p_weekly, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(25, 75)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Weekly / Almost Weekly", x = "", y = "% of group", color = "") + theme_party
+
+p_never <- calc_party_pct(data_church, "church_group", "Rarely/Never")
+g_never <- ggplot(p_never, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(25, 75)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Rarely / Never", x = "", y = "% of group", color = "") + theme_party
+
+grid.arrange(g_weekly, g_never, ncol = 2,
+             top = grid::textGrob("Party Affiliation by Church Attendance Over Time",
+                                  gp = grid::gpar(fontsize = 16, fontface = "bold")))
+```
+
+Church attendance has become an increasingly powerful predictor of Republican identification. Weekly attenders have shifted dramatically toward the GOP since the 1970s — a trend that accelerated in the 1990s alongside the rise of the Christian right. Secular Americans (those who rarely or never attend) have moved in the opposite direction, deepening the religious attendance cleavage [@mason2018].
+
+```{r region-plot}
+p_south <- calc_party_pct(data_model, "region", "South")
+g_south <- ggplot(p_south, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(25, 75)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "South", x = "", y = "% of group", color = "") + theme_party
+
+p_northeast <- calc_party_pct(data_model, "region", "Northeast")
+g_northeast <- ggplot(p_northeast, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(25, 75)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Northeast", x = "", y = "% of group", color = "") + theme_party
+
+p_midwest <- calc_party_pct(data_model, "region", "Midwest")
+g_midwest <- ggplot(p_midwest, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(25, 75)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Midwest", x = "", y = "% of group", color = "") + theme_party
+
+p_west <- calc_party_pct(data_model, "region", "West")
+g_west <- ggplot(p_west, aes(x = period, y = pct, color = party)) +
+  geom_line(linewidth = 1.2) + geom_point(size = 2) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(labels = function(x) paste0(x, "%"), limits = c(25, 75)) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "West", x = "", y = "% of group", color = "") + theme_party
+
+grid.arrange(g_south, g_northeast, g_midwest, g_west, ncol = 2, nrow = 2,
+             top = grid::textGrob("Party Affiliation by Region Over Time",
+                                  gp = grid::gpar(fontsize = 16, fontface = "bold")))
+```
+
+Regional realignment is among the most consequential demographic shifts of the past 70 years. The South was solidly Democratic through the 1960s — a legacy of the Civil War and Reconstruction — but has become reliably Republican since the 1990s following the racial realignment triggered by the Civil Rights Act. The Northeast, conversely, has moved from competitive to safely Democratic. These patterns are consistent with the nationalization thesis: regional distinctiveness is declining as national partisan identity overrides local political traditions.
+
+## Ideological Divergence Between Parties
+
+```{r ideology-plot}
+ideology_time <- data_model %>%
+  filter(!is.na(ideology), !is.na(party)) %>%
+  mutate(period = floor(year / 10) * 10) %>%
+  group_by(period, party) %>%
+  summarise(mean_ideology = mean(ideology, na.rm = TRUE),
+            n = n(), .groups = "drop")
+
+ggplot(ideology_time, aes(x = period, y = mean_ideology, color = party)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 2.5) +
+  scale_color_manual(values = party_colors) +
+  scale_y_continuous(limits = c(1, 7), 
+                     breaks = 1:7,
+                     labels = c("Extremely\nLiberal", "Liberal", "Slightly\nLiberal", 
+                                "Moderate", "Slightly\nConserv.", "Conserv.", 
+                                "Extremely\nConserv.")) +
+  labs(title = "Ideological Divergence Between Parties",
+       subtitle = "Mean self-placement on liberal-conservative scale",
+       x = "", y = "", color = "") +
+  theme_party
+```
+
+The ideological divergence chart provides descriptive support for increasing polarization. In the 1970s, average self-placement was roughly "Moderate" for Democrats and "Slightly Conservative" for Republicans — a small gap consistent with @fiorina2005's characterization of a moderate public. By the 2020s, both parties have moved toward their respective poles, with Democrats averaging "Slightly Liberal" and Republicans approaching "Conservative." This divergence is consistent with @abramowitz2008's argument that partisan sorting is real and measurable. Importantly, however, this chart reflects self-placement on a single dimension; the machine learning models below use issue-specific attitudes to assess *actual* sorting behavior, not just self-identification.
+
+---
+
+# Machine Learning Analysis
+
+## Defining the ML Sample
+
+```{r ml-setup}
+decades <- c("1980s", "1990s", "2000s", "2010s", "2020s")
+data_ml <- data_model %>% filter(decade %in% decades)
+
+demographic_vars <- c("age", "gender", "race", "education", "region",
+                      "income", "religion", "church", "marital",
+                      "work_status", "religion_important")
+
+data_demo <- data_ml %>%
+  select(party, decade, all_of(demographic_vars)) %>%
+  mutate(
+    marital = factor(marital, levels = c(1, 2, 3, 4, 5, 7),
+                     labels = c("Married", "Never married", "Divorced",
+                                "Separated", "Widowed", "Partners")),
+    work_status = factor(work_status, levels = c(1, 2, 3, 4, 5, 6, 7),
+                         labels = c("Working", "Temp laid off", "Unemployed",
+                                    "Retired", "Disabled", "Homemaker", "Student")),
+    religion_important = factor(religion_important, levels = c(1, 2),
+                                labels = c("Important", "Not important"))
+  ) %>%
+  drop_na()
+
+attitude_vars_clean <- c("gov_jobs", "aid_black", "abortion", "gov_spending",
+                         "religion_important", "moral_adjust", "traditional_values",
+                         "equal_opportunity", "not_problem_unequal",
+                         "worry_less_equality", "fewer_problems_equal")
+
+cat("Demographics sample:", nrow(data_demo), "\n")
+cat("ML data (all attitude records):", nrow(data_ml), "\n")
+```
+
+The ML analysis is restricted to the 1980s–2020s (five decades) for the attitudes track, as most attitude variables were not asked before 1980. The demographics track also begins in the 1980s for consistency. Attitude variable availability per decade is confirmed to meet the ≥40% threshold.
+
+## Demographics Track
+
+### Logistic Regression
+
+```{r logreg-demo}
+set.seed(123)
+logreg_results_demo <- data.frame()
+
+for (dec in decades) {
+  subset <- data_demo %>% filter(decade == dec)
+  train_idx <- createDataPartition(subset$party, p = 0.7, list = FALSE)
+  train <- subset[train_idx, ]
+  test <- subset[-train_idx, ]
+  
+  log_model <- glm(party ~ age + gender + race + education + region + income + 
+                     religion + church + marital + work_status + religion_important,
+                   data = train, family = binomial)
+  
+  pred_prob <- predict(log_model, newdata = test, type = "response")
+  pred_class <- factor(ifelse(pred_prob > 0.5, "Republican", "Democrat"),
+                       levels = levels(test$party))
+  
+  cm <- confusionMatrix(pred_class, test$party, positive = "Republican")
+  auc_val <- auc(roc(as.numeric(test$party == "Republican"), pred_prob, quiet = TRUE))
+  
+  logreg_results_demo <- rbind(logreg_results_demo, data.frame(
+    decade = dec,
+    accuracy = round(cm$overall["Accuracy"] * 100, 1),
+    f1 = round(cm$byClass["F1"] * 100, 1),
+    auc = round(auc_val * 100, 1),
+    n_train = nrow(train), n_test = nrow(test)
+  ))
+}
+
+rownames(logreg_results_demo) <- NULL
+kable(logreg_results_demo, caption = "Demographics: Logistic Regression performance by decade")
+```
+
+### Decision Tree
+
+```{r decision-tree-demo}
+set.seed(123)
+tree_full <- rpart(
+  party ~ age + gender + race + education + region + income + 
+    religion + church + marital + work_status + religion_important,
+  data = data_demo,
+  method = "class",
+  control = rpart.control(maxdepth = 5, minsplit = 200, minbucket = 80, cp = 0.003)
+)
+
+rpart.plot(tree_full,
+           type = 4, extra = 104, fallen.leaves = TRUE,
+           main = "Party Identification Decision Tree\n(Demographics, 1980s–2020s)",
+           cex = 0.55,
+           box.palette = c("#2171b5", "#cb181d"))
+```
+
+The decision tree reveals the most discriminating demographic combinations. Race is the first split: Black and Hispanic respondents are overwhelmingly classified as Democrats regardless of other characteristics, while white respondents are sorted further by religious importance, church attendance, gender, and education. This hierarchical structure reflects the racial sorting of American politics [@abramowitz2008] and the growing importance of religious identity [@mason2018].
+
+```{r dt-demo-loop}
+set.seed(123)
+dt_results_demo <- data.frame()
+
+for (dec in decades) {
+  subset <- data_demo %>% filter(decade == dec)
+  train_idx <- createDataPartition(subset$party, p = 0.7, list = FALSE)
+  train <- subset[train_idx, ]
+  test <- subset[-train_idx, ]
+  
+  tree_model <- rpart(
+    party ~ age + gender + race + education + region + income + 
+      religion + church + marital + work_status + religion_important,
+    data = train, method = "class",
+    control = rpart.control(maxdepth = 5, minsplit = 100, minbucket = 50, cp = 0.005)
+  )
+  
+  pred <- predict(tree_model, newdata = test, type = "class")
+  acc <- mean(pred == test$party)
+  
+  dt_results_demo <- rbind(dt_results_demo, data.frame(
+    decade = dec, model = "Decision Tree",
+    accuracy = round(acc * 100, 1),
+    n_train = nrow(train), n_test = nrow(test)
+  ))
+}
+
+kable(dt_results_demo, caption = "Demographics: Decision Tree performance by decade")
+```
+
+### Random Forest
+
+```{r rf-demo}
+set.seed(123)
+rf_results_demo <- data.frame()
+
+for (dec in decades) {
+  subset <- data_demo %>% filter(decade == dec)
+  train_idx <- createDataPartition(subset$party, p = 0.7, list = FALSE)
+  train <- subset[train_idx, ]
+  test <- subset[-train_idx, ]
+  
+  rf_model <- randomForest(
+    party ~ age + gender + race + education + region + income + 
+      religion + church + marital + work_status + religion_important,
+    data = train, ntree = 500
+  )
+  
+  rf_pred <- predict(rf_model, newdata = test)
+  rf_prob <- predict(rf_model, newdata = test, type = "prob")[, "Republican"]
+  
+  cm <- confusionMatrix(rf_pred, test$party, positive = "Republican")
+  auc_val <- auc(roc(as.numeric(test$party == "Republican"), rf_prob, quiet = TRUE))
+  
+  rf_results_demo <- rbind(rf_results_demo, data.frame(
+    decade = dec,
+    accuracy = round(cm$overall["Accuracy"] * 100, 1),
+    f1 = round(cm$byClass["F1"] * 100, 1),
+    auc = round(auc_val * 100, 1),
+    n_train = nrow(train), n_test = nrow(test)
+  ))
+}
+
+rownames(rf_results_demo) <- NULL
+kable(rf_results_demo, caption = "Demographics: Random Forest performance by decade")
+```
+
+### Demographics Summary Plot
+
+```{r demo-summary-plot}
+all_demo <- rbind(
+  dt_results_demo %>% select(decade, model = model, accuracy),
+  logreg_results_demo %>% mutate(model = "Logistic Regression") %>% select(decade, model, accuracy),
+  rf_results_demo %>% mutate(model = "Random Forest") %>% select(decade, model, accuracy)
+)
+
+all_demo$decade <- factor(all_demo$decade, levels = decades)
+all_demo$model <- factor(all_demo$model, 
+                         levels = c("Logistic Regression", "Decision Tree", "Random Forest"))
+
+demo_colors <- c("Logistic Regression" = "#2d8659", 
+                 "Decision Tree" = "#e6994a",
+                 "Random Forest" = "#7b68ee")
+
+ggplot(all_demo, aes(x = decade, y = accuracy, color = model, group = model)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  geom_text(aes(label = paste0(accuracy, "%")), vjust = -1, size = 3) +
+  scale_color_manual(values = demo_colors) +
+  scale_y_continuous(limits = c(55, 80), labels = function(x) paste0(x, "%")) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Demographics-Only Models: Accuracy by Decade",
+       subtitle = "All models show increasing accuracy → demographics increasingly predict party ID (H2)",
+       x = "", y = "Test Accuracy", color = "Model") +
+  theme_party
+```
+
+Demographics-only accuracy increases from approximately 64% in the 1980s to 71% in the 2020s across all three model types. This ~7 percentage point gain over four decades suggests that demographic characteristics have become modestly more predictive of party identification, consistent with H2. However, the rate of increase is smaller than for the attitudes track (below), suggesting that attitudinal sorting, rather than demographic realignment, is the primary driver of the overall polarization trend.
+
+## Attitudes Track
+
+### Variable Coverage by Decade
+
+```{r att-coverage}
+data_ml %>%
+  filter(decade %in% decades) %>%
+  group_by(decade) %>%
+  summarise(across(all_of(attitude_vars_clean), 
+                   ~round(mean(!is.na(.)) * 100, 0))) %>%
+  pivot_longer(-decade, names_to = "variable", values_to = "pct_available") %>%
+  pivot_wider(names_from = decade, values_from = pct_available) %>%
+  kable(caption = "% of non-missing observations by attitude variable and decade")
+```
+
+### Logistic Regression with MICE Imputation
+
+```{r logreg-att}
+set.seed(123)
+logreg_results_att <- data.frame()
+
+for (dec in decades) {
+  cat(paste0("\n--- ", dec, " ---\n"))
+  
+  subset_raw <- data_ml %>%
+    filter(decade == dec) %>%
+    select(party, all_of(attitude_vars_clean)) %>%
+    filter(!is.na(party))
+  
+  imp <- mice(subset_raw, m = 5, maxit = 10, method = "pmm", 
+              seed = 123, printFlag = FALSE)
+  
+  acc_all <- c(); f1_all <- c(); auc_all <- c()
+  
+  for (i in 1:5) {
+    data_imp <- complete(imp, i)
+    train_idx <- createDataPartition(data_imp$party, p = 0.7, list = FALSE)
+    train <- data_imp[train_idx, ]
+    test <- data_imp[-train_idx, ]
+    
+    log_model <- glm(party ~ ., data = train, family = binomial)
+    pred_prob <- predict(log_model, newdata = test, type = "response")
+    pred_class <- factor(ifelse(pred_prob > 0.5, "Republican", "Democrat"),
+                         levels = levels(test$party))
+    
+    cm <- confusionMatrix(pred_class, test$party, positive = "Republican")
+    auc_val <- auc(roc(as.numeric(test$party == "Republican"), pred_prob, quiet = TRUE))
+    
+    acc_all <- c(acc_all, cm$overall["Accuracy"])
+    f1_all <- c(f1_all, cm$byClass["F1"])
+    auc_all <- c(auc_all, as.numeric(auc_val))
+  }
+  
+  logreg_results_att <- rbind(logreg_results_att, data.frame(
+    decade = dec, model = "Logistic Regression",
+    accuracy = round(mean(acc_all) * 100, 1),
+    f1 = round(mean(f1_all) * 100, 1),
+    auc = round(mean(auc_all) * 100, 1),
+    n_total = nrow(subset_raw)
+  ))
+}
+
+rownames(logreg_results_att) <- NULL
+kable(logreg_results_att, caption = "Attitudes: Logistic Regression performance by decade (averaged over 5 MICE imputations)")
+```
+
+### Logistic Regression Coefficient Heatmap
+
+```{r coef-heatmap}
+coef_att_list <- list()
+
+for (dec in decades) {
+  subset_raw <- data_ml %>%
+    filter(decade == dec) %>%
+    select(party, all_of(attitude_vars_clean)) %>%
+    filter(!is.na(party))
+  
+  imp <- mice(subset_raw, m = 5, maxit = 10, method = "pmm",
+              seed = 123, printFlag = FALSE)
+  
+  coef_all <- list()
+  for (i in 1:5) {
+    data_imp <- complete(imp, i)
+    log_model <- glm(party ~ ., data = data_imp, family = binomial)
+    coef_all[[i]] <- coef(log_model)[-1]
+  }
+  
+  avg_coef <- Reduce("+", coef_all) / 5
+  coef_att_list[[dec]] <- data.frame(
+    decade = dec,
+    variable = names(avg_coef),
+    coefficient = as.numeric(avg_coef)
+  )
+}
+
+coef_att_df <- bind_rows(coef_att_list)
+coef_att_df$decade <- factor(coef_att_df$decade, levels = decades)
+
+var_labels_att <- c(
+  "gov_jobs" = "Gov't Jobs", "aid_black" = "Aid to Black Americans",
+  "abortion" = "Abortion", "gov_spending" = "Gov't Spending",
+  "religion_important" = "Religion Important", "moral_adjust" = "Moral Standards",
+  "traditional_values" = "Traditional Values", "equal_opportunity" = "Equal Opportunity",
+  "not_problem_unequal" = "Not Problem if Unequal",
+  "worry_less_equality" = "Worry Less Equality",
+  "fewer_problems_equal" = "Fewer Problems if Equal"
+)
+
+coef_att_df$label <- var_labels_att[coef_att_df$variable]
+var_order <- coef_att_df %>%
+  group_by(label) %>%
+  summarise(avg = mean(abs(coefficient))) %>%
+  arrange(avg) %>%
+  pull(label)
+coef_att_df$label <- factor(coef_att_df$label, levels = var_order)
+
+ggplot(coef_att_df, aes(x = decade, y = label, fill = coefficient)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  scale_fill_gradient2(low = "#2171b5", mid = "white", high = "#cb181d",
+                       midpoint = 0, name = "Coefficient\n(+ = Republican)") +
+  geom_text(aes(label = round(coefficient, 2)), size = 2.8) +
+  labs(title = "How Attitudes Predict Party ID Across Decades",
+       subtitle = "Logistic regression coefficients | Blue = predicts Democrat, Red = predicts Republican",
+       x = "", y = "") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 14),
+        plot.subtitle = element_text(color = "gray40", size = 10),
+        axis.text.y = element_text(size = 10))
+```
+
+The coefficient heatmap reveals several substantively important trends directly relevant to H3. **Abortion** shows the most dramatic strengthening across decades: its coefficient grows from approximately 0 in the 1980s to −0.65 by the 2020s (negative = more pro-choice → more Democratic), making it the single strongest attitudinal predictor by the 2020s. **Government spending preferences** similarly strengthen. **Traditional values** and **moral standards** maintain consistent Republican direction throughout, but their magnitude increases over time.
+
+Crucially, economic items (`gov_jobs`, `equal_opportunity`) show relatively stable and modest coefficients — providing partial support for H3's prediction that moral/cultural issues would show larger gains than economic issues.
+
+### LASSO
+
+```{r lasso}
+set.seed(123)
+lasso_coefs <- list()
+lasso_results <- data.frame()
+
+for (dec in decades) {
+  subset_raw <- data_ml %>%
+    filter(decade == dec) %>%
+    select(party, all_of(attitude_vars_clean)) %>%
+    filter(!is.na(party))
+  
+  data_imp <- complete(mice(subset_raw, m = 1, maxit = 10,
+                            method = "pmm", seed = 123, printFlag = FALSE), 1)
+  
+  idx <- createDataPartition(data_imp$party, p = 0.7, list = FALSE)
+  train <- data_imp[idx, ]
+  test <- data_imp[-idx, ]
+  
+  x_train <- as.matrix(train[, -1])
+  y_train <- as.numeric(train$party == "Republican")
+  x_test <- as.matrix(test[, -1])
+  
+  cv_lasso <- cv.glmnet(x_train, y_train, family = "binomial", alpha = 1, nfolds = 10)
+  
+  pred_prob <- predict(cv_lasso, x_test, s = "lambda.min", type = "response")
+  pred_class <- factor(ifelse(pred_prob > 0.5, "Republican", "Democrat"),
+                       levels = levels(test$party))
+  
+  acc <- mean(pred_class == test$party)
+  coefs <- coef(cv_lasso, s = "lambda.min")
+  coef_df <- data.frame(
+    decade = dec,
+    variable = rownames(coefs)[-1],
+    coefficient = as.numeric(coefs)[-1]
+  )
+  lasso_coefs[[dec]] <- coef_df
+  lasso_results <- rbind(lasso_results, data.frame(decade = dec, accuracy = round(acc * 100, 1)))
+}
+
+kable(lasso_results, caption = "LASSO accuracy by decade (attitudes track)")
+```
+
+```{r lasso-heatmap}
+lasso_coef_df <- bind_rows(lasso_coefs)
+lasso_coef_df$decade <- factor(lasso_coef_df$decade, levels = decades)
+lasso_coef_df$label <- var_labels_att[lasso_coef_df$variable]
+var_order_lasso <- lasso_coef_df %>%
+  group_by(label) %>%
+  summarise(avg = mean(abs(coefficient))) %>%
+  arrange(avg) %>%
+  pull(label)
+lasso_coef_df$label <- factor(lasso_coef_df$label, levels = var_order_lasso)
+
+ggplot(lasso_coef_df, aes(x = decade, y = label, fill = coefficient)) +
+  geom_tile(color = "white", linewidth = 0.5) +
+  scale_fill_gradient2(low = "#2171b5", mid = "white", high = "#cb181d",
+                       midpoint = 0, name = "LASSO Coef\n(+ = Republican)") +
+  geom_text(aes(label = round(coefficient, 2)), size = 2.8) +
+  labs(title = "LASSO Coefficients: Attitudes by Decade",
+       subtitle = "Zero = variable eliminated by LASSO | Growing magnitude = growing predictive power",
+       x = "", y = "") +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 14),
+        plot.subtitle = element_text(color = "gray40", size = 10),
+        axis.text.y = element_text(size = 10))
+```
+
+LASSO results corroborate the logistic regression findings. Unlike regularized models in earlier decades that might shrink weak predictors toward zero, LASSO retains all 11 variables in most decades — confirming that each attitude item carries independent predictive signal. The growing magnitudes of abortion and government spending coefficients in the 2020s are consistent across both estimation methods, reinforcing their substantive importance.
+
+### Random Forest with MICE
+
+```{r rf-att}
+set.seed(123)
+rf_results_att <- data.frame()
+
+for (dec in decades) {
+  cat(paste0("\n--- ", dec, " ---\n"))
+  
+  subset_raw <- data_ml %>%
+    filter(decade == dec) %>%
+    select(party, all_of(attitude_vars_clean)) %>%
+    filter(!is.na(party))
+  
+  imp <- mice(subset_raw, m = 5, maxit = 10, method = "pmm",
+              seed = 123, printFlag = FALSE)
+  
+  acc_all <- c(); f1_all <- c(); auc_all <- c()
+  
+  for (i in 1:5) {
+    data_imp <- complete(imp, i)
+    train_idx <- createDataPartition(data_imp$party, p = 0.7, list = FALSE)
+    train <- data_imp[train_idx, ]
+    test <- data_imp[-train_idx, ]
+    
+    rf_model <- randomForest(party ~ ., data = train, ntree = 500, mtry = 2, importance = TRUE)
+    pred_rf <- predict(rf_model, newdata = test)
+    rf_prob <- predict(rf_model, newdata = test, type = "prob")[, "Republican"]
+    
+    cm <- confusionMatrix(pred_rf, test$party, positive = "Republican")
+    auc_val <- auc(roc(as.numeric(test$party == "Republican"), rf_prob, quiet = TRUE))
+    
+    acc_all <- c(acc_all, cm$overall["Accuracy"])
+    f1_all <- c(f1_all, cm$byClass["F1"])
+    auc_all <- c(auc_all, as.numeric(auc_val))
+  }
+  
+  rf_results_att <- rbind(rf_results_att, data.frame(
+    decade = dec, model = "Random Forest",
+    accuracy = round(mean(acc_all) * 100, 1),
+    f1 = round(mean(f1_all) * 100, 1),
+    auc = round(mean(auc_all) * 100, 1),
+    n_total = nrow(subset_raw)
+  ))
+}
+
+rownames(rf_results_att) <- NULL
+kable(rf_results_att, caption = "Attitudes: Random Forest performance by decade (averaged over 5 MICE imputations)")
+```
+
+### Attitudes Summary Plot
+
+```{r att-summary-plot}
+all_att <- rbind(logreg_results_att, rf_results_att)
+all_att$decade <- factor(all_att$decade, levels = decades)
+
+att_colors <- c("Logistic Regression" = "#7b68ee", "Random Forest" = "#2d8659")
+
+ggplot(all_att, aes(x = decade, y = accuracy, color = model, group = model)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  geom_text(aes(label = paste0(accuracy, "%")), vjust = -1, size = 3) +
+  scale_color_manual(values = att_colors) +
+  scale_y_continuous(limits = c(55, 95), labels = function(x) paste0(x, "%")) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Attitudes-Only Models: Accuracy by Decade (MICE Imputation)",
+       subtitle = "67% → 86% accuracy | Strong support for H1: ideological sorting increasing",
+       x = "", y = "Test Accuracy", color = "Model") +
+  theme_party
+```
+
+The attitudes track shows a striking increase in predictive accuracy: from approximately 68% in the 1980s to 86% in the 2020s — an 18 percentage point gain. This is more than twice the gain observed in the demographics track (~7pp), suggesting that the primary engine of partisan sorting is ideological, not demographic. Both logistic regression and random forest models follow nearly identical trajectories, indicating that the trend is robust to model specification.
+
+This finding aligns closely with @murphy2020, who documented accelerating issue partisanship from 1972 to 2016, and @ojer2025, who found systematic ideological divergence across demographic groups. The magnitude of the 2020s accuracy (~86%) substantially exceeds the ~64% ceiling for demographics-only models reported by @kim2022 — confirming that it is attitudes, not demographics, that drive modern partisan identity.
+
+## ROC Curves: 1980s vs. 2020s
+
+### 1980s
+
+```{r roc-1980s}
+subset_raw <- data_ml %>%
+  filter(decade == "1980s") %>%
+  select(party, all_of(attitude_vars_clean)) %>%
+  filter(!is.na(party))
+data_imp <- complete(mice(subset_raw, m = 1, maxit = 10, method = "pmm",
+                          seed = 123, printFlag = FALSE), 1)
+set.seed(123)
+idx <- createDataPartition(data_imp$party, p = 0.7, list = FALSE)
+train_att <- data_imp[idx, ]; test_att <- data_imp[-idx, ]
+
+subset_demo <- data_demo %>% filter(decade == "1980s")
+set.seed(123)
+idx2 <- createDataPartition(subset_demo$party, p = 0.7, list = FALSE)
+train_demo <- subset_demo[idx2, ]; test_demo <- subset_demo[-idx2, ]
+
+log_demo <- glm(party ~ age + gender + race + education + region + income +
+                  religion + church + marital + work_status + religion_important,
+                data = train_demo, family = binomial)
+log_demo_prob <- predict(log_demo, test_demo, type = "response")
+
+rf_demo <- randomForest(party ~ age + gender + race + education + region + income +
+                          religion + church + marital + work_status + religion_important,
+                        data = train_demo, ntree = 500)
+rf_demo_prob <- predict(rf_demo, test_demo, type = "prob")[, "Republican"]
+
+log_att <- glm(party ~ ., data = train_att, family = binomial)
+log_att_prob <- predict(log_att, test_att, type = "response")
+
+rf_att <- randomForest(party ~ ., data = train_att, ntree = 500, mtry = 2)
+rf_att_prob <- predict(rf_att, test_att, type = "prob")[, "Republican"]
+
+roc_log_att <- roc(as.numeric(test_att$party == "Republican"), log_att_prob, quiet = TRUE)
+roc_rf_att  <- roc(as.numeric(test_att$party == "Republican"), rf_att_prob, quiet = TRUE)
+roc_log_demo <- roc(as.numeric(test_demo$party == "Republican"), log_demo_prob, quiet = TRUE)
+roc_rf_demo  <- roc(as.numeric(test_demo$party == "Republican"), rf_demo_prob, quiet = TRUE)
+
+plot(roc_log_att, col = "#7b68ee", lwd = 2, main = "ROC Curves — 1980s Models")
+lines(roc_rf_att, col = "#2d8659", lwd = 2)
+lines(roc_log_demo, col = "#e6994a", lwd = 2)
+lines(roc_rf_demo, col = "#c9853a", lwd = 2, lty = 2)
+abline(a = 0, b = 1, lty = 3, col = "gray50")
+legend("bottomright",
+       legend = c(paste0("Attitudes LogReg (AUC=", round(auc(roc_log_att), 3), ")"),
+                  paste0("Attitudes RF (AUC=",     round(auc(roc_rf_att),  3), ")"),
+                  paste0("Demographics LogReg (AUC=", round(auc(roc_log_demo), 3), ")"),
+                  paste0("Demographics RF (AUC=",     round(auc(roc_rf_demo),  3), ")")),
+       col = c("#7b68ee", "#2d8659", "#e6994a", "#c9853a"),
+       lwd = 2, lty = c(1, 1, 1, 2), cex = 0.9)
+```
+
+### 2020s
+
+```{r roc-2020s}
+subset_raw <- data_ml %>%
+  filter(decade == "2020s") %>%
+  select(party, all_of(attitude_vars_clean)) %>%
+  filter(!is.na(party))
+data_imp <- complete(mice(subset_raw, m = 1, maxit = 10, method = "pmm",
+                          seed = 123, printFlag = FALSE), 1)
+set.seed(123)
+idx <- createDataPartition(data_imp$party, p = 0.7, list = FALSE)
+train_att <- data_imp[idx, ]; test_att <- data_imp[-idx, ]
+
+subset_demo <- data_demo %>% filter(decade == "2020s")
+set.seed(123)
+idx2 <- createDataPartition(subset_demo$party, p = 0.7, list = FALSE)
+train_demo <- subset_demo[idx2, ]; test_demo <- subset_demo[-idx2, ]
+
+log_demo <- glm(party ~ age + gender + race + education + region + income +
+                  religion + church + marital + work_status + religion_important,
+                data = train_demo, family = binomial)
+log_demo_prob <- predict(log_demo, test_demo, type = "response")
+
+rf_demo <- randomForest(party ~ age + gender + race + education + region + income +
+                          religion + church + marital + work_status + religion_important,
+                        data = train_demo, ntree = 500)
+rf_demo_prob <- predict(rf_demo, test_demo, type = "prob")[, "Republican"]
+
+log_att <- glm(party ~ ., data = train_att, family = binomial)
+log_att_prob <- predict(log_att, test_att, type = "response")
+
+rf_att <- randomForest(party ~ ., data = train_att, ntree = 500, mtry = 2)
+rf_att_prob <- predict(rf_att, test_att, type = "prob")[, "Republican"]
+
+roc_log_att <- roc(as.numeric(test_att$party == "Republican"), log_att_prob, quiet = TRUE)
+roc_rf_att  <- roc(as.numeric(test_att$party == "Republican"), rf_att_prob, quiet = TRUE)
+roc_log_demo <- roc(as.numeric(test_demo$party == "Republican"), log_demo_prob, quiet = TRUE)
+roc_rf_demo  <- roc(as.numeric(test_demo$party == "Republican"), rf_demo_prob, quiet = TRUE)
+
+plot(roc_log_att, col = "#7b68ee", lwd = 2, main = "ROC Curves — 2020s Models")
+lines(roc_rf_att, col = "#2d8659", lwd = 2)
+lines(roc_log_demo, col = "#e6994a", lwd = 2)
+lines(roc_rf_demo, col = "#c9853a", lwd = 2, lty = 2)
+abline(a = 0, b = 1, lty = 3, col = "gray50")
+legend("bottomright",
+       legend = c(paste0("Attitudes LogReg (AUC=", round(auc(roc_log_att), 3), ")"),
+                  paste0("Attitudes RF (AUC=",     round(auc(roc_rf_att),  3), ")"),
+                  paste0("Demographics LogReg (AUC=", round(auc(roc_log_demo), 3), ")"),
+                  paste0("Demographics RF (AUC=",     round(auc(roc_rf_demo),  3), ")")),
+       col = c("#7b68ee", "#2d8659", "#e6994a", "#c9853a"),
+       lwd = 2, lty = c(1, 1, 1, 2), cex = 0.9)
+```
+
+The ROC curves make the temporal change starkly visible. In the 1980s, attitudes and demographics produce AUC values in a roughly comparable range (~0.67–0.71). By the 2020s, the attitudes track has surged to AUC ≈ 0.93, while the demographics track remains at AUC ≈ 0.77. The gap between these two tracks — practically nonexistent in the 1980s — represents the growing centrality of issue positions in structuring partisan identity. This is the core empirical finding of the study.
+
+## Grand Combined Plot
+
+```{r grand-combined}
+grand <- rbind(
+  rf_results_att %>% mutate(track = "Attitudes (RF)") %>% select(decade, track, accuracy),
+  rf_results_demo %>% mutate(track = "Demographics (RF)") %>% select(decade, track, accuracy)
+)
+
+grand$decade <- factor(grand$decade, levels = decades)
+grand_colors <- c("Attitudes (RF)" = "#2d8659", "Demographics (RF)" = "#c9853a")
+
+ggplot(grand, aes(x = decade, y = accuracy, color = track, group = track)) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 3) +
+  geom_text(aes(label = paste0(accuracy, "%")), vjust = -1, size = 3) +
+  scale_color_manual(values = grand_colors) +
+  scale_y_continuous(limits = c(55, 95), labels = function(x) paste0(x, "%")) +
+  geom_hline(yintercept = 50, linetype = "dashed", color = "gray50", alpha = 0.5) +
+  labs(title = "Model Accuracy Over Time: Demographics vs Attitudes",
+       subtitle = "Both tracks show increasing accuracy → H1 and H2 supported: ideological sorting is growing",
+       x = "", y = "Test Accuracy", color = "Track") +
+  theme_party
+```
+
+---
+
+# Discussion
+
+## Hypothesis Evaluation
+
+**H1 — SUPPORTED.** Attitude-based classification models show a consistent and substantial increase in accuracy across all five decades, rising from ~68% in the 1980s to ~86% in the 2020s (both logistic regression and random forest). This ~18 percentage point gain provides strong evidence that ideological sorting — the alignment of policy attitudes with party identification — has intensified significantly over the past four decades. This finding directly challenges @fiorina2005's argument that polarization is merely elite-driven; it is reflected in the predictability of mass partisanship from issue positions.
+
+**H2 — PARTIALLY SUPPORTED.** Demographics-only models also show increasing accuracy, from ~64% to ~71%. However, the gain is smaller (~7pp) and plateaus somewhat in the 2000s–2020s. This partial result is consistent with @kim2022's finding that demographic predictability of party ID has not increased dramatically, even as attitudinal predictability has surged. The growing importance of religious attendance and religious salience in the demographics track, however, suggests that the *identity* dimension of partisanship @mason2018 describes is capturing something real.
+
+**H3 — SUPPORTED.** The coefficient heatmaps reveal that abortion, traditional values, and moral standards show the largest increases in predictive magnitude across decades. Abortion in particular grows from a near-zero coefficient in the 1980s to the largest negative coefficient in the 2020s, consistent with the post-*Roe* and post-*Dobbs* intensification of reproductive rights as a partisan identity issue. Economic items (`gov_jobs`, `equal_opportunity`) show comparatively stable, smaller coefficients — supporting the hypothesis that cultural/moral sorting has outpaced economic sorting.
+
+**H4 — SUPPORTED.** The proportion of misclassified respondents decreases substantially across both tracks. In the attitudes track, misclassification falls from ~32% in the 1980s to ~14% in the 2020s. This shrinking misclassified share represents the disappearing political middle: respondents whose issue positions do not match their party's platform. As sorting increases, such cross-pressured voters become rarer, consistent with @baldassarri2008's "issue partisanship" framework.
+
+## Substantive Interpretation
+
+Taken together, the findings support a picture of accelerating partisan sorting driven primarily by ideological — and especially cultural/moral — realignment. The data is consistent with @mason2018's "social polarization" thesis: even before attitudes shift dramatically, the *alignment* of existing attitudes with party identity creates an increasingly sorted electorate where party membership is more and more predictable from one's views.
+
+The divergence between the attitudes track (86% accuracy) and the demographics track (71% accuracy) in the 2020s echoes @kim2022's conclusion that what you believe has become more predictive of your party than who you are demographically. However, our findings extend their analysis temporally: this gap between beliefs and demography has been *growing* since the 1980s, not simply stable at a high level.
+
+The LASSO results confirm that most attitude items carry independent predictive signal: penalized regression retains all 11 variables in nearly every decade, suggesting that partisan sorting is multidimensional rather than reducible to a single "culture war" axis. Abortion is the strongest predictor in the 2020s, but racial resentment proxies (`aid_black`), government spending preferences, and traditional values all contribute independently.
+
+## Limitations
+
+**Excluded Independents.** The analytical sample excludes pure Independents (ANES partyid=4), who represent a potentially important group of cross-pressured voters. Including leaners-toward-independents but excluding pure independents is a deliberate analytic choice consistent with the sorting literature, but it means that the growing share of independent identifiers over time is not captured here.
+
+**Variable Coverage Constraints.** The 40% availability threshold and restriction to 11 attitude variables imposes a significant constraint, particularly for the 1980s where several key variables (racial resentment items, some moral/cultural items) have only 30–42% coverage. MICE imputation partly addresses this, but results for earlier decades should be interpreted with greater caution.
+
+**Binary Outcome.** Collapsing the 7-point party ID scale to a binary Democrat/Republican outcome loses information about intensity of partisan attachment. Future work could use ordinal or multinomial models to distinguish leaners from strong identifiers.
+
+**Feeling Thermometers and Affective Polarization.** This study focuses on issue-based sorting; it does not directly assess affective polarization (dislike of the opposing party), which @mason2018 argues has grown independently of policy divergence. Incorporating feeling thermometer data would allow separation of issue sorting from affective polarization.
+
+### Future Directions
+
+Future research could extend this framework in several directions. First, incorporating the feeling thermometer variables (excluded here due to high missingness in earlier waves) would allow direct measurement of affective polarization alongside issue sorting. Second, a multilevel model that includes party-level covariates (e.g., congressional polarization scores, party platform positions) could test whether elite polarization *Granger-causes* mass sorting, addressing the @fiorina2005 vs. @abramowitz2008 debate more directly. Third, applying this framework to subnational data would allow examination of whether sorting has been geographically uneven — an increasingly important question given the divergence of red and blue state political cultures.
+
+---
+
+# Conclusion
+
+This study applied a decade-by-decade machine learning classification framework to the ANES Cumulative Data File (1952–2024) to assess how the predictive power of social attitudes and demographic characteristics for party identification has changed over time.
+
+The central finding is clear: **ideological sorting has accelerated substantially since the 1980s.** Attitude-based models achieve 86% accuracy in the 2020s compared to 68% in the 1980s — an 18 percentage point gain that far exceeds the modest 7 percentage point improvement in demographics-only models. The growing gap between these two tracks indicates that it is primarily *what Americans believe*, rather than *who they are*, that now determines their party.
+
+At the level of specific attitudes, abortion has emerged as the dominant predictor of partisan identity by the 2020s, displacing what was once a weaker and more cross-cutting relationship. Traditional values, racial resentment attitudes, and government spending preferences have also strengthened as partisan dividers. Economic issues show comparatively modest gains, consistent with the "culture war" account of contemporary American polarization.
+
+These findings are most consistent with @abramowitz2008's thesis that polarization is real, measurable, and growing — rather than @fiorina2005's elite illusion argument. At the same time, they support @mason2018's emphasis on identity sorting: it is not merely that attitudes have diverged, but that they have become increasingly aligned with partisan identity, even when those attitudes themselves remain somewhat heterogeneous within parties.
+
+The shrinking proportion of model misclassifications across decades represents, in substantive terms, a shrinking political middle — voters whose issue positions cross party lines. As that middle disappears, American politics becomes more predictable, more sorted, and, in @mason2018's terms, more socially polarized regardless of whether individual citizens have become more extreme in their views.
+
+---
+
+# References
+
+::: {#refs}
+:::
